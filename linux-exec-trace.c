@@ -49,7 +49,7 @@
 
 #define _XOPEN_SOURCE 700
 
-
+//todo: show cmdline in multiple lines
 //todo: read keyboard to enable/disable logging CWD / ENV / argv ...
 //todo: log file event
 //todo: log fork and process exit event
@@ -111,15 +111,8 @@ sigchld(int sig)
   quit = 1;
 }
 
-static void
-print_shquoted(const char *s)
-{
-  if (*s && !strpbrk(s,
-                     "\001\002\003\004\005\006\007\010"
-                     "\011\012\013\014\015\016\017\020"
-                     "\021\022\023\024\025\026\027\030"
-                     "\031\032\033\034\035\036\037\040"
-                     "`^#*[]=|\\?${}()'\"<>&;\177")) {
+static void _print_shquoted(const char *s, const char *meta_chars) {
+  if (*s && !strpbrk(s, meta_chars) {
     fprintf(output, "%s", s);
     return;
   }
@@ -133,6 +126,22 @@ print_shquoted(const char *s)
     else
       putc(*s, output);
   putc('\'', output);
+}
+
+static void print_shquoted(const char *s) {
+  print_shquoted(s, "\001\002\003\004\005\006\007\010"
+      "\011\012\013\014\015\016\017\020"
+      "\021\022\023\024\025\026\027\030"
+      "\031\032\033\034\035\036\037\040"
+      "`^#*[]|\\?${}()'\"<>&;\177");
+}
+
+static void print_shquoted_env(const char *s) {
+  print_shquoted(s, "\001\002\003\004\005\006\007\010"
+      "\011\012\013\014\015\016\017\020"
+      "\021\022\023\024\025\026\027\030"
+      "\031\032\033\034\035\036\037\040"
+      "`^#*[]|\\?${}()'\"<>&;\177=");
 }
 
 static void
@@ -252,12 +261,12 @@ handle_msg(struct cn_msg *cn_hdr)
           if ((eq = strchr(line, '='))) {
             /* print split so = doesn't trigger escaping.  */
             *eq = 0;
-            print_shquoted(line);
+            print_shquoted_env(line);
             putc('=', output);
-            print_shquoted(eq+1);
+            print_shquoted_env(eq+1);
           } else {
             /* weird env entry without equal sign.  */
-            print_shquoted(line);
+            print_shquoted_env(line);
           }
         }
         free(line);
@@ -272,6 +281,15 @@ handle_msg(struct cn_msg *cn_hdr)
   }
 }
 
+const char my_short_opts[] = "efht";
+struct option my_long_opts[] = {
+    {"exec", 0, NULL, 'e'},
+    {"fork", 0, NULL, 'f'},
+    {"help", 0, NULL, 'h'},
+    {"thread", 0, NULL, 't'},
+    {}
+};
+
 int
 main(int argc, char *argv[])
 {
@@ -284,6 +302,9 @@ main(int argc, char *argv[])
   enum proc_cn_mcast_op *mcop_msg;
   size_t recv_len = 0;
   int rc = -1, opt;
+
+  const char* exeName = strrchr(argv[0], '/');
+  if (!exeName) exeName = argv[0];
 
   output = stdout;
 
@@ -308,7 +329,8 @@ main(int argc, char *argv[])
 
   if (parent != 1 && optind != argc) {
 usage:
-    fprintf(stderr, "Usage: extrace [-deq] [-o FILE] [-p PID|CMD...]\n");
+    fprintf(stderr, "Usage: %s [-d|--cwd] [-e|--env] [-q|--no-args]\n", exeName);
+    fprintf(stderr, "       %.*s [-o FILE] [-p PID|CMD...]\n", strlen(exeName));
     exit(1);
   }
 
