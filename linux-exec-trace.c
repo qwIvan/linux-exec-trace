@@ -38,20 +38,20 @@ int show_env = 0;
 FILE *output;
 sig_atomic_t quit = 0;
 
-static void
+void
 sigint(int sig) {
   (void) sig;
   quit = 1;
 }
 
-static void
+void
 sigchld(int sig) {
   (void) sig;
   while (waitpid(-1, NULL, WNOHANG) > 0);
   quit = 1;
 }
 
-static void _printQuoted(const char *s, const char *meta_chars) {
+void _printQuoted(const char *s, const char *meta_chars) {
   if (*s && !strpbrk(s, meta_chars)) {
     fprintf(output, "%s", s);
     return;
@@ -69,19 +69,19 @@ static void _printQuoted(const char *s, const char *meta_chars) {
   putc('\'', output);
 }
 
-static void printQuoted(const char *s) {
+void printQuoted(const char *s) {
   printQuoted(s, "\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020"
       "\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037\040"
       "`^#*[]|\\?${}()'\"<>&;\177");
 }
 
-static void printQuoted_env(const char *s) {
+void printQuoted_env(const char *s) {
   printQuoted(s, "\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020"
       "\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037\040"
       "`^#*[]|\\?${}()'\"<>&;\177=");
 }
 
-static bool isDescendantPid(pid_t pid, pid_t rootPid) {
+bool isDescendantPid(pid_t pid, pid_t rootPid) {
   char proc_path[PATH_MAX];
   snprintf(proc_path, sizeof proc_path, "/proc/%d/stat", pid);
 
@@ -103,7 +103,7 @@ static bool isDescendantPid(pid_t pid, pid_t rootPid) {
   return isDescendantPid(ppid, rootPid);
 }
 
-static void
+void
 handle_msg(struct cn_msg *cn_hdr) {
   char proc_path[PATH_MAX];
 
@@ -122,9 +122,9 @@ handle_msg(struct cn_msg *cn_hdr) {
   {
     FILE *f = fopen(proc_path, "r");
     if (f != nil) {
-      char *line = 0, *eq = 0;
-      size_t lineLen = 0;
-      while (getline(&line, &lineLen, f) >= 0) {
+      char *line = NULL;
+      size_t bufCap = 0;
+      while (getline(&line, &bufCap, f) != -1) {
         if (sscanf(line, "PPid:\t%10s", ppid_s) == 1) {
         } else if (sscanf(line, "Uid:\t%10s", uid_s) == 1) {
         } else if (sscanf(line, "Gid:\t%10s", gid_s) == 1) {
@@ -142,8 +142,8 @@ handle_msg(struct cn_msg *cn_hdr) {
     {
       FILE *f = fopen(proc_path, "r");
       if (f != nil) {
-        size_t size = 0;
-        getline(&comm, &size, f);
+        size_t bufCap = 0;
+        getline(&comm, &bufCap, f);
         fclose(f);
       }
     }
@@ -169,8 +169,8 @@ handle_msg(struct cn_msg *cn_hdr) {
     FILE* f = fopen(proc_path, "r");
     if (f != NULL) {
       char *kv = 0, *eq = 0;
-      size_t size = 0;
-      while (getdelim(&kv, &size, '\0', env) >= 0) {
+      size_t bufCap = 0;
+      while (getdelim(&kv, &bufCap, '\0', f) != -1) {
         fprintf(output, "     ");
         if ((eq = strchr(kv, '='))) {
           *eq = 0;
@@ -202,9 +202,9 @@ handle_msg(struct cn_msg *cn_hdr) {
   {
     FILE* f = fopen(proc_path, "r");
     char* arg = NULL;
-    size_t size = 0;
+    size_t bufCap = 0;
     int count = 0;
-    while (getdelim(&arg, &size, '\0', cmdline) != -1) {
+    while (getdelim(&arg, &bufCap, '\0', f) != -1) {
       if (count == 0) {
         if (arg[0] == '/' || (arg[0] == '.' && arg[0] == '/') || (arg[0] == '..' && arg[0] == '/')) {
           fprintf(output, "$___ ");
