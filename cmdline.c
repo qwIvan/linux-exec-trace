@@ -6,6 +6,10 @@
 #include <getopt.h>
 #include <errno.h>
 
+#define CMD_HEAD "$___ "
+#define ENV_HEAD "     "
+#define ARG_HEAD "$___     "
+
 int show_env = 0;
 
 void _print_quoted(const char *s, const char *meta_chars) {
@@ -39,23 +43,24 @@ void _print_quoted(const char *s, const char *meta_chars) {
       printf("'$'\\n''");
     else if (*s == '\t')
       printf("'$'\\t''");
-    else if (*s >= 0x01 && *s <= 0x31 || *s == 0x7f)
+    else if (*s >= 0x00 && *s <= 0x1f || *s == 0x7f)
       printf("'$'\\x%02x''", *s);
     else
       putc(*s, stdout);
   putc('\'', stdout);
 }
 
+#define NON_PRINTABLE_CHARS "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f" \
+                        "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x7f"
+
+#define SHELL_META_CHARS " `^#*[]|\\?${}()'\"<>&;"
+
 void print_quoted(const char *s) {
-  _print_quoted(s, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-      " `^#*[]|\\?${}()'\"<>&;\177");
+  _print_quoted(s, NON_PRINTABLE_CHARS SHELL_META_CHARS);
 }
 
 void print_quoted_env(const char *s) {
-  _print_quoted(s, "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f"
-      "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-      " `^#*[]|\\?${}()'\"<>&;\177=");
+  _print_quoted(s, NON_PRINTABLE_CHARS SHELL_META_CHARS "=");
 }
 
 void print_cmdline(pid_t pid) {
@@ -66,7 +71,7 @@ void print_cmdline(pid_t pid) {
     char cwd[PATH_MAX] = "";
     int len = readlink(proc_path, cwd, sizeof(cwd) - 1);
     if (len > 0) {
-      printf("    cd ");
+      printf(CMD_HEAD "cd ");
       print_quoted(cwd);
       printf(" & \\\n");
     }
@@ -74,12 +79,12 @@ void print_cmdline(pid_t pid) {
 
   if (show_env) {
     snprintf(proc_path, sizeof proc_path, "/proc/%d/environ", pid);
-    FILE* f = fopen(proc_path, "r");
+    FILE *f = fopen(proc_path, "r");
     if (f != NULL) {
       char *kv = 0, *eq = 0;
       size_t bufCap = 0;
       while (getdelim(&kv, &bufCap, '\0', f) >= 0) {
-        printf("     ");
+        printf(ENV_HEAD);
         if ((eq = strchr(kv, '='))) {
           *eq = 0;
           print_quoted_env(kv);
@@ -96,7 +101,7 @@ void print_cmdline(pid_t pid) {
     }
   }
 
-  char exe[PATH_MAX] = "?";
+  char exe[PATH_MAX] = "";
   snprintf(proc_path, sizeof proc_path, "/proc/%d/exe", pid);
   {
     int len = readlink(proc_path, exe, sizeof(exe) - 1);
@@ -107,25 +112,21 @@ void print_cmdline(pid_t pid) {
   snprintf(proc_path, sizeof proc_path, "/proc/%d/cmdline", pid);
   {
     int count = 0;
-    FILE* f = fopen(proc_path, "r");
+    FILE *f = fopen(proc_path, "r");
     if (f != NULL) {
       char *arg = NULL;
       size_t bufCap = 0;
       while (getdelim(&arg, &bufCap, '\0', f) != -1) {
         if (count == 0) {
-          if (arg[0] == '/' || (arg[0] == '.' && arg[0] == '/') || (arg[0] == '.' && arg[0] == '/')) {
-            printf("$___ ");
-            print_quoted(exe);
-            printf(" \\\n");
-          } else {
-            printf("$___ exec -a ");
+          if (strcmp(arg, exe)) {
+            printf(CMD_HEAD "exec -a ");
             print_quoted(arg);
-            printf(" ");
-            print_quoted(exe);
             printf(" \\\n");
           }
+          printf(CMD_HEAD);
+          print_quoted(exe);
         } else {
-          printf("$___    ");
+          printf(ARG_HEAD);
           print_quoted(arg);
         }
         printf(" \\\n");
@@ -136,10 +137,11 @@ void print_cmdline(pid_t pid) {
     }
 
     if (count == 0) {
+      printf(CMD_HEAD);
       print_quoted(exe);
+      printf("\n");
     }
   }
-  printf("\n");
 
   fflush(stdout);
 }
@@ -147,8 +149,11 @@ void print_cmdline(pid_t pid) {
 const char *exeName;
 
 void usage() {
-  printf("Usage1: %s [-e|--env] pid ...\n", exeName);
-  printf("Usage2: ps | %s [-e|--env]\n", exeName);
+  printf("Usage:\n");
+  printf(" - Print command line of PIDs specified by arguments\n"
+             "   %s [-e|--env] pid ...\n", exeName);
+  printf(" - Print command line of PIDs from input (first numeric field of each line):\n"
+             "   ps | %s [-e|--env]\n", exeName);
 }
 
 int main(int argc, char *argv[]) {
@@ -158,7 +163,7 @@ int main(int argc, char *argv[]) {
 
   struct option long_options[] = {
       {"env", no_argument, NULL, 'e'},
-      {0, 0, 0, 0}
+      {0,     0,           0,    0}
   };
   int opt, option_index;
   while ((opt = getopt_long(argc, argv, "e", long_options, &option_index)) != -1) {
@@ -172,6 +177,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  extern int optind;
   if (optind < argc) {
     while (optind < argc) {
       pid_t pid = 0;
@@ -185,12 +191,16 @@ int main(int argc, char *argv[]) {
     size_t bufCap = 0;
     while (getline(&line, &bufCap, stdin) != -1) {
       printf("%s", line);
-      fflush(stdout);
-      pid_t pid = 0;
-      if (sscanf(line, "%d", &pid) == 1) {
-        print_cmdline(pid);
-        fflush(stdout);
+      char *save_ptr = NULL;
+      char *token;
+      while ((token = strtok_r(save_ptr ? NULL : line, " ", &save_ptr)) != NULL) {
+        pid_t pid;
+        if (sscanf(token, "%d", &pid) == 1) {
+          print_cmdline(pid);
+          break;
+        }
       }
+      fflush(stdout);
     }
     int e = errno;
     if (!feof(stdin)) {
@@ -199,6 +209,5 @@ int main(int argc, char *argv[]) {
       return EXIT_FAILURE;
     }
   }
-
   return EXIT_SUCCESS;
 }
